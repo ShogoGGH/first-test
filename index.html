@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>逆三角陣形シューターゲーム v2 改訂</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; font-family: sans-serif; background: #d2b48c; }
+    canvas { display: block; background: linear-gradient(to bottom,#e0cda9,#b6885f); }
+    #ui { position: absolute; top: 10px; left: 10px; color: #fff; font-size: 1rem; text-shadow: 1px 1px 2px #000; }
+    #ui span { margin-right: 20px; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui">
+    <span>仲間: <span id="allyCount">1</span></span>
+    <span>スコア: <span id="scoreCount">0</span></span>
+  </div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // プレイヤー設定
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height * 0.85,
+      size: 40,
+      speed: 5,
+      baseInterval: 300,
+      lastShot: 0
+    };
+    const bullets = [];
+    const keys = { left: false, right: false };
+
+    // 障害物
+    const obstacles = [];
+    let spawnTimer = 0;
+
+    // UI 状態
+    let alliesCount = 1;
+    let score = 0;
+    let stageTime = 0;
+
+    // 入力処理
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+    });
+    window.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+    });
+
+    function update(dt) {
+      stageTime += dt;
+      // プレイヤー移動
+      if (keys.left) player.x -= player.speed;
+      if (keys.right) player.x += player.speed;
+      player.x = Math.max(player.size/2, Math.min(canvas.width - player.size/2, player.x));
+
+      // 自動射撃間隔を仲間数に応じて短縮（最低50ms）
+      const interval = Math.max(50, player.baseInterval - (alliesCount - 1) * 20);
+      player.lastShot += dt;
+      if (player.lastShot > interval) {
+        bullets.push({ x: player.x, y: player.y - player.size/2, dy: -0.7 });
+        player.lastShot = 0;
+      }
+
+      // 障害物生成
+      spawnTimer += dt;
+      if (spawnTimer > 2000) {
+        spawnTimer = 0;
+        const x = Math.random() * (canvas.width - 60) + 30;
+        // 15秒経過後は18～50のHP、未満は1～5
+        const hp = stageTime > 15000
+          ? Math.floor(Math.random() * (50 - 18 + 1)) + 18
+          : Math.floor(Math.random() * 5) + 1;
+        obstacles.push({ x, y: -50, size: 60, hp, type: 'block' });
+      }
+
+      // 弾更新・衝突判定
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.y += b.dy * dt;
+        if (b.y < -10) { bullets.splice(i, 1); continue; }
+        for (let j = obstacles.length - 1; j >= 0; j--) {
+          const o = obstacles[j];
+          if (b.x > o.x - o.size/2 && b.x < o.x + o.size/2 && b.y > o.y && b.y < o.y + o.size) {
+            o.hp--; bullets.splice(i, 1);
+            if (o.hp <= 0) {
+              obstacles.splice(j, 1);
+              alliesCount++;
+              score += 10;
+            }
+            break;
+          }
+        }
+      }
+
+      // 障害物更新
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].y += dt * 0.1;
+        if (obstacles[i].y > canvas.height) obstacles.splice(i, 1);
+      }
+
+      // UI更新
+      document.getElementById('allyCount').textContent = alliesCount;
+      document.getElementById('scoreCount').textContent = score;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // プレイヤー描画
+      ctx.fillStyle = '#007aff';
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.size/2, 0, Math.PI * 2);
+      ctx.fill();
+      // 弾描画
+      ctx.fillStyle = '#fff';
+      bullets.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      // 障害物描画
+      ctx.fillStyle = '#8b4513';
+      obstacles.forEach(o => {
+        ctx.fillRect(o.x - o.size/2, o.y, o.size, o.size);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(o.hp, o.x - ctx.measureText(o.hp).width/2, o.y + 20);
+        ctx.fillStyle = '#8b4513';
+      });
+
+      // 仲間描画（全幅を活用して逆三角形）
+      let d = 0, row = 1, gapY = 30;
+      while (d < alliesCount) {
+        const countInRow = Math.min(alliesCount - d, row);
+        const gapX = canvas.width / (countInRow + 1);
+        for (let i = 0; i < countInRow; i++) {
+          const x = gapX * (i + 1);
+          const y = player.y + row * gapY;
+          ctx.fillStyle = '#34c759';
+          ctx.fillRect(x - 10, y - 10, 20, 20);
+          d++;
+        }
+        row++;
+      }
+    }
+
+    let lastTime = 0;
+    function loop(time) {
+      const dt = time - lastTime;
+      lastTime = time;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
